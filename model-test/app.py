@@ -73,7 +73,7 @@ async def main():
         cv2.imshow("Video Capture", img)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-
+         
         await asyncio.sleep(0.01)
 
 if __name__ == "__main__":
