@@ -101,19 +101,18 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def validate_video_file(file):
-    try:
-        verify_jwt_in_request()
-    except:
-        return False, "Authentication required"
+    # Add explicit file size check
+    file.seek(0, os.SEEK_END)
+    file_length = file.tell()
+    file.seek(0)  # Reset file pointer
     
-    if not file:
-        return False, "No file provided"
+    if file_length > MAX_FILE_SIZE:
+        return False, "File size exceeds 100MB limit"
+    
     if not allowed_file(file.filename):
         return False, "File type not allowed"
-    if file.content_length > MAX_FILE_SIZE:
-        return False, "File size exceeds limit"
+    
     return True, ""
-
 # Auth endpoints
 @app.route('/register', methods=['POST'])
 def register():
@@ -171,9 +170,13 @@ def process_video():
         return jsonify({"error": "No video file uploaded"}), 400
     
     file = request.files['video']
-    if file.content_length > MAX_FILE_SIZE:
-        return jsonify({"error": "File too large"}), 413
-        
+    
+    # Log file details AFTER accessing the file
+    app.logger.info(f"Received file upload:")
+    app.logger.info(f"Filename: {file.filename}")
+    app.logger.info(f"Content Type: {file.content_type}")
+    
+    # Remove content_length check as it might not be reliable
     valid, message = validate_video_file(file)
     if not valid:
         return jsonify({"error": message}), 400
@@ -198,7 +201,7 @@ def process_video():
     except Exception as e:
         logger.error(f"Error in process-video endpoint: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
-
+    
 @app.route("/processed/<filename>")
 @jwt_required()
 def get_processed_video(filename):

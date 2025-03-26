@@ -62,15 +62,23 @@ const CameraAdd = () => {
 
         const onError = (data) => {
             if (data.filename === fileName) {
+                // More detailed error handling
                 toast({
-                    title: "Processing error",
-                    description: data.message || "An error occurred",
+                    title: "Processing Error",
+                    description: data.message || "An unexpected error occurred during video processing",
                     status: "error",
-                    duration: 5000,
+                    duration: 6000,
+                    isClosable: true
                 });
+
+                // Reset progress and status
+                setUploadProgress(0);
+                setProcessingProgress(0);
+                setCurrentStatus('');
             }
         };
 
+        // ... rest of the existing code remains the same
         const onProcessingProgress = (data) => {
             if (data.filename === fileName) {
                 setProcessingProgress(data.progress);
@@ -162,12 +170,16 @@ const CameraAdd = () => {
                             resolve(xhr.response);
                             setCurrentStatus('Processing started...');
                         } else {
-                            reject(new Error(xhr.statusText));
+                            // Parse error response
+                            const errorResponse = JSON.parse(xhr.responseText);
+                            reject(new Error(errorResponse.error || 'Upload failed'));
                         }
                     }
                 };
                 xhr.open("POST", `${API_URL}/process-video`, true);
-                xhr.setRequestHeader('Authorization', `Bearer ${user.token}`); // Add auth header
+
+                // Add Authorization header
+                xhr.setRequestHeader('Authorization', `Bearer ${user.access_token}`);
                 xhr.send(formData);
             });
 

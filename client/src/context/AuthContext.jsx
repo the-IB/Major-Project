@@ -16,8 +16,13 @@ export const AuthProvider = ({ children }) => {
                 password
             });
 
-            setUser(response.data);
-            localStorage.setItem('user', JSON.stringify(response.data));
+            const userData = {
+                ...response.data,
+                token: response.data.access_token  // Explicitly store the token
+            };
+
+            setUser(userData);
+            localStorage.setItem('user', JSON.stringify(userData));
             navigate('/');
             return { success: true };
         } catch (error) {
