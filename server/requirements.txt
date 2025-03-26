@@ -1,0 +1,11 @@
+Flask
+Flask-Cors
+Flask-SocketIO
+requests
+ultralytics
+opencv-python-headless
+cvzone
+numpy
+matplotlib
+scikit-image
+filterpy
