@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useContext } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
     Container,
     Flex,
@@ -13,20 +13,19 @@ import {
     Tooltip,
     Box,
     Progress,
-    Text
+    Text,
+    Spinner
 } from "@chakra-ui/react";
 import { AiOutlineVideoCameraAdd } from "react-icons/ai";
 import { AddIcon } from "@chakra-ui/icons";
 import ProcessedModal from "../components/ProcessedModal";
 import UploadedModal from "../components/UploadedModal";
 import { io } from "socket.io-client";
-import { AuthContext } from "../context/AuthContext"; // Import AuthContext
 
 const API_URL = "http://localhost:5000";
 const socket = io(API_URL);
 
 const CameraAdd = () => {
-    const { user } = useContext(AuthContext); // Get user from context
     const [cameraUrl, setCameraUrl] = useState("");
     const [isValidating, setIsValidating] = useState(false);
     const [fileURL, setFileURL] = useState(null);
@@ -62,7 +61,6 @@ const CameraAdd = () => {
 
         const onError = (data) => {
             if (data.filename === fileName) {
-                // More detailed error handling
                 toast({
                     title: "Processing Error",
                     description: data.message || "An unexpected error occurred during video processing",
@@ -71,14 +69,12 @@ const CameraAdd = () => {
                     isClosable: true
                 });
 
-                // Reset progress and status
                 setUploadProgress(0);
                 setProcessingProgress(0);
                 setCurrentStatus('');
             }
         };
 
-        // ... rest of the existing code remains the same
         const onProcessingProgress = (data) => {
             if (data.filename === fileName) {
                 setProcessingProgress(data.progress);
@@ -101,16 +97,6 @@ const CameraAdd = () => {
     }, [fileName, toast]);
 
     const handleFileSelect = (event) => {
-        if (!user) {
-            toast({
-                title: "Please login",
-                description: "You need to be logged in to upload videos",
-                status: "warning",
-                duration: 5000,
-            });
-            return;
-        }
-
         const file = event.target.files[0];
         if (!file) return;
 
@@ -143,7 +129,7 @@ const CameraAdd = () => {
     };
 
     const handleUpload = async () => {
-        if (!file || !user) return;
+        if (!file) return;
 
         setUploadProgress(0);
         setProcessingProgress(0);
@@ -170,16 +156,16 @@ const CameraAdd = () => {
                             resolve(xhr.response);
                             setCurrentStatus('Processing started...');
                         } else {
-                            // Parse error response
-                            const errorResponse = JSON.parse(xhr.responseText);
-                            reject(new Error(errorResponse.error || 'Upload failed'));
+                            try {
+                                const errorResponse = JSON.parse(xhr.responseText || '{}');
+                                reject(new Error(errorResponse.error || 'Upload failed'));
+                            } catch {
+                                reject(new Error(`Upload failed with status ${xhr.status}`));
+                            }
                         }
                     }
                 };
                 xhr.open("POST", `${API_URL}/process-video`, true);
-
-                // Add Authorization header
-                xhr.setRequestHeader('Authorization', `Bearer ${user.access_token}`);
                 xhr.send(formData);
             });
 
@@ -197,16 +183,6 @@ const CameraAdd = () => {
     };
 
     const validateCameraUrl = async () => {
-        if (!user) {
-            toast({
-                title: "Please login",
-                description: "You need to be logged in to add cameras",
-                status: "warning",
-                duration: 5000,
-            });
-            return;
-        }
-
         if (!cameraUrl.trim()) {
             toast({
                 title: "Empty URL",
@@ -224,7 +200,6 @@ const CameraAdd = () => {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    "Authorization": `Bearer ${user.token}` // Add auth header
                 },
                 body: JSON.stringify({ url: cameraUrl }),
             });
@@ -279,9 +254,8 @@ const CameraAdd = () => {
                                         isLoading={isValidating}
                                         colorScheme="blue"
                                         px={4}
-                                        isDisabled={!user} // Disable if not logged in
                                     >
-                                        <AddIcon />
+                                        {!isValidating ? <AddIcon /> : <Spinner />}
                                     </Button>
                                 </Tooltip>
                                 <Tooltip label="Upload video file">
@@ -291,7 +265,6 @@ const CameraAdd = () => {
                                         colorScheme="teal"
                                         aria-label="Upload video"
                                         icon={<AiOutlineVideoCameraAdd size={22} />}
-                                        isDisabled={!user} // Disable if not logged in
                                     />
                                 </Tooltip>
                                 <input
@@ -303,11 +276,6 @@ const CameraAdd = () => {
                                     ref={fileInputRef}
                                 />
                             </HStack>
-                            {!user && (
-                                <Text mt={2} fontSize="sm" color="gray.500" textAlign="center">
-                                    Please login to upload videos or add cameras
-                                </Text>
-                            )}
                             {(uploadProgress > 0 || processingProgress > 0) && (
                                 <Box mt={4}>
                                     <Text fontSize="sm" mb={1}>

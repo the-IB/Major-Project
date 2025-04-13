@@ -1,11 +1,6 @@
 from flask import Flask, request, Response, jsonify, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-from flask_jwt_extended import (
-    JWTManager, jwt_required, create_access_token,
-    get_jwt_identity, verify_jwt_in_request
-)
-from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from functools import wraps
 import os
@@ -19,8 +14,6 @@ from modules.sort import *
 import logging
 import subprocess
 import time
-import uuid
-import datetime
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -28,10 +21,6 @@ CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Configuration
-app.config['JWT_SECRET_KEY'] = 'your-very-secret-key-change-this'  # Change in production!
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=1)
-jwt = JWTManager(app)
-
 UPLOAD_FOLDER = "uploads"
 PROCESSED_FOLDER = "processed"
 ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm'}
@@ -51,24 +40,6 @@ except Exception as e:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database setup
-from flask_sqlalchemy import SQLAlchemy
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
-# User model
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    public_id = db.Column(db.String(50), unique=True)
-    username = db.Column(db.String(50), unique=True)
-    password = db.Column(db.String(80))
-    role = db.Column(db.String(20))  # 'admin' or 'user'
-
-# Create tables
-with app.app_context():
-    db.create_all()
-
 # Decorators
 def cleanup_files(func):
     @wraps(func)
@@ -83,16 +54,6 @@ def cleanup_files(func):
             ]
             for f in temp_files:
                 if os.path.exists(f): os.remove(f)
-    return wrapper
-
-def admin_required(fn):
-    @wraps(fn)
-    @jwt_required()
-    def wrapper(*args, **kwargs):
-        current_user = get_jwt_identity()
-        if current_user.get('role') != 'admin':
-            return jsonify({"error": "Admin access required"}), 403
-        return fn(*args, **kwargs)
     return wrapper
 
 # Utility functions
@@ -113,83 +74,42 @@ def validate_video_file(file):
         return False, "File type not allowed"
     
     return True, ""
-# Auth endpoints
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.get_json()
-    
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({"error": "Missing username or password"}), 400
-    
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({"error": "Username already exists"}), 400
-    
-    hashed_password = generate_password_hash(data['password'], method='scrypt')
-    new_user = User(
-        public_id=str(uuid.uuid4()),
-        username=data['username'],
-        password=hashed_password,
-        role=data.get('role', 'user')
-    )
-    
-    db.session.add(new_user)
-    db.session.commit()
-    
-    return jsonify({"message": "User created successfully"}), 201
-
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.get_json()
-    
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({"error": "Missing username or password"}), 400
-    
-    user = User.query.filter_by(username=data['username']).first()
-    
-    if not user or not check_password_hash(user.password, data['password']):
-        return jsonify({"error": "Invalid credentials"}), 401
-    
-    access_token = create_access_token(identity={
-        'public_id': user.public_id,
-        'username': user.username,
-        'role': user.role
-    })
-    
-    return jsonify({
-        'access_token': access_token,
-        'username': user.username,
-        'role': user.role
-    }), 200
 
 # Video processing endpoints
 @app.route("/process-video", methods=["POST"])
-@jwt_required()
 @cleanup_files
-def process_video():
+def process_video():   
+    # Check if any files are present
+    if not request.files:
+        logger.error("No files in the request")
+        return jsonify({"error": "No files uploaded"}), 400
+    
+    # Check for specific 'video' file
     if 'video' not in request.files:
+        logger.error("No 'video' file found in request")
         return jsonify({"error": "No video file uploaded"}), 400
     
     file = request.files['video']
     
-    # Log file details AFTER accessing the file
-    app.logger.info(f"Received file upload:")
-    app.logger.info(f"Filename: {file.filename}")
-    app.logger.info(f"Content Type: {file.content_type}")
-    
-    # Remove content_length check as it might not be reliable
+    # Validate file
     valid, message = validate_video_file(file)
     if not valid:
+        logger.error(f"File validation failed: {message}")
         return jsonify({"error": message}), 400
     
     try:
         filename = secure_filename(file.filename)
         video_path = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # Ensure upload folder exists
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         file.save(video_path)
         
         processed_video_path = os.path.join(PROCESSED_FOLDER, filename)
         success, message = process_video_with_yolo(video_path, processed_video_path, filename)
         
         if not success:
+            logger.error(f"Video processing failed: {message}")
             return jsonify({"error": message}), 500
         
         socketio.emit('video_processed', {'filename': filename})
@@ -199,11 +119,10 @@ def process_video():
         }), 200
         
     except Exception as e:
-        logger.error(f"Error in process-video endpoint: {str(e)}")
+        logger.error(f"Error in process-video endpoint: {str(e)}", exc_info=True)
         return jsonify({"error": "Internal server error"}), 500
-    
+
 @app.route("/processed/<filename>")
-@jwt_required()
 def get_processed_video(filename):
     try:
         filename = secure_filename(filename)
@@ -250,7 +169,6 @@ def get_processed_video(filename):
         return jsonify({"error": "Internal server error"}), 500
 
 @app.route('/validate-camera', methods=['POST'])
-@jwt_required()
 def validate_camera():
     try:
         data = request.get_json()
@@ -298,7 +216,6 @@ def validate_camera():
             "message": "Internal server error during validation"
         }), 500
 
-# Video processing function (unchanged)
 def process_video_with_yolo(input_video_path, output_video_path, filename):
     try:
         start_time = time.time()
@@ -395,15 +312,6 @@ def process_video_with_yolo(input_video_path, output_video_path, filename):
         if os.path.exists(output_video_path):
             os.remove(output_video_path)
         return False, str(e)
-
-# Error handlers
-@app.errorhandler(401)
-def unauthorized(error):
-    return jsonify({"error": "Unauthorized"}), 401
-
-@app.errorhandler(403)
-def forbidden(error):
-    return jsonify({"error": "Forbidden"}), 403
 
 if __name__ == "__main__":
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
